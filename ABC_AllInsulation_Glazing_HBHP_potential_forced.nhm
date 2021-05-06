@@ -1,0 +1,200 @@
+;; quick-start scenario for ABC
+;; scenario content:
+(scenario
+    start-date: 01/01/2020
+    end-date: 31/12/2020
+    stock-id: /EPC_NEED/default-england-ehcs-2012.stock
+    
+        energy-calculator: BREDEM2012
+    (include-modules /SAP2012-Master/SAP12-tariffs.nhm)
+    (include-modules /SAP2012-Master/SAP12-carbon.nhm)
+   ; (under 
+        ; (counterfactual.energy-calculator SAP2012)
+         ;   evaluate: (house.energy-use))
+    (~module sap
+         (template init[])
+         
+         (template under-sap [@evaluate]
+                   ;; Run a function under SAP conditions.
+                   (under
+                       (counterfactual.energy-calculator SAP2012)
+                       (counterfactual.carbon)
+                       ;sap-tariffs/set-defaults
+                       ;sap-tariffs/define
+                       evaluate: @evaluate))
+         
+         (template score []
+                   ;; Calculate the SAP score.
+                   (/under-sap
+                       evaluate: (house.fuel-cost-index))))
+   
+    (~init-modules)
+     
+       
+    (sap-tariffs/define)
+    
+    (def-report SAP
+                record-changes: true
+                (column name: score value: (sap/score) 
+                        summary: mean)
+                (column name: energy value: (sap/under-sap evaluate: (house.energy-use))
+                        summary: sum)
+                (column name: emissions value: (sap/under-sap evaluate: (house.emissions))
+                        summary: sum)
+                (column name: fuel-cost value: (sap/under-sap evaluate: (house.fuel-cost))
+                        summary: sum)
+                )
+
+    ;define report to cover all the required outputs to compare EPC rating with energy consumption across different MIT
+    ;aggregates are also calculated in the scenario: see below
+
+    (def-report stock_report_Installation_counts
+                record-changes: true
+        (column name: NumberHouses_HasCavityWall_Any value: (any 
+                                                                            (house.any-wall has-construction: AnyCavity ) 
+                                                                            ) 
+                        summary: count)
+        (column name: NumberHouses_HasCavityWall_All value: (any 
+                                                                            (house.all-walls has-construction: AnyCavity ) 
+                                                                            ) 
+                        summary: count)
+        (column name: NumberHouses_HasCavityInsulation_Any value: (any 
+                                                                            (house.any-wall has-cavity-insulation: true ) 
+                                                                            ) 
+                        summary: count)
+        (column name: NumberHouses_HasCavityInsulation_All value: (any 
+                                                                            (house.all-walls has-cavity-insulation: true ) 
+                                                                            ) 
+                        summary: count)
+        (column name: NumberHouses_NoCavityInsulation_Any value: (any 
+                                                                            (house.any-wall has-cavity-insulation: false ) 
+                                                                            ) 
+                        summary: count)
+        (column name: NumberHouses_NoCavityInsulation_All value: (any 
+                                                                            (house.any-wall has-cavity-insulation: false ) 
+                                                                            ) 
+                        summary: count)
+       )
+    
+(def-report StandardAggregates_Energy+
+                record-changes: true 
+               (column name: HouseEnergyUse                   value: (house.energy-use)                                 summary: sum  )
+               (column name: GasDemand                        value: (house.energy-use by-fuel: MainsGas )              summary: sum)
+               (column name: ElecDemand                       value: (house.energy-use by-fuel: Electricity )           summary: sum)
+               (column name: LPGDemand                        value: (+ (house.energy-use by-fuel: BottledLPG) (house.energy-use by-fuel: BulkLPG) )                                                    summary:sum)
+               (column name: BiomassDemand                    value: (+ (house.energy-use by-fuel: BiomassPellets) (house.energy-use by-fuel: BiomassWood) (house.energy-use by-fuel: BiomassWoodchip)) summary:sum)
+               (column name: OilDemand                        value: (house.energy-use by-fuel: Oil)                    summary:sum)
+               (column name: CommunityHeatDeman               value: (house.energy-use by-fuel: CommunityHeat)          summary:sum)
+               (column name: CoalDemand                       value: (house.energy-use by-fuel: HouseCoal)              summary:sum)
+               (column name: HouseSpaceDemand                 value: (house.energy-use by-service:PrimarySpaceHeating ) summary: sum)
+               (column name: MeanWallUvalue                   value: (house.u-value of: Walls)                          summary: mean)
+               (column name: MeanInternalTemp                 value:(house.mean-internal-temperature)                   summary: mean)
+               (column name: MeanWallHeatLossCoeff                      value:(house.energy-calculation-step HeatLossCoefficient_ExternalWall)             summary: mean)
+               (column name: MeanSpaceHeatGASEnergy                     value:  (house.energy-use by-service: PrimarySpaceHeating by-fuel: MainsGas)    summary: sum)
+               (column name: MeanSpaceHeatELECEnergy                    value:  (house.energy-use by-service: PrimarySpaceHeating by-fuel: Electricity)  summary: sum)
+               (column name: MeanTotalGASEnergyIntensity_perM2          value: (/ (house.energy-use by-fuel: MainsGas)  house.total-floor-area )    summary: mean)
+               (column name: MeanTotalELECEnergyIntensity_perM2         value: (/ (house.energy-use by-fuel: Electricity)  house.total-floor-area ) summary: mean)
+               (column name: MeanDoubleGlazingProportion                value: (house.double-glazed-proportion)         summary: mean)
+               (column name: MeanWindowUvalue                           value:  (house.u-value of: Windows)                          summary: mean)
+               (column name: MeanSolarGains                             value: (house.energy-calculation-step Gains_Solar)          summary:mean)
+               (column name: MeanHeatingEfficiency                      value: (house.heating-efficiency of: PrimarySpaceHeating)       summary:mean)
+               (column name: PVGeneration                               value: (house.energy-calculation-step Generation_PhotoVoltaic)  summary:sum)
+               (column name: TotalFloorArea_m2                          value: (house.total-floor-area)                 summary:sum)
+                )
+    ;; scenario goes here:
+    (on.dates (regularly)  
+        (aggregate name: counts
+            (aggregate.count name:population))
+          
+           (apply name: AllHousesReportBefore
+                  (send-to-report #StandardAggregates_Energy+ from: AllHousesReportBefore)
+                  to: (all-houses)
+                  )
+              
+              (apply
+               (probe.aggregate
+                   (measure.wall-insulation thickness: 0 u-value: 0.1   
+                                               update-flags: CavityInsulated
+                                               name:CavityInsulated
+                                               report: [#SAP #stock_report_Installation_counts #StandardAggregates_Energy+] )
+               name: AreaOfCavityWallsM2 capture: (aggregate.sum   size.m2 )
+                      )
+                  to: (filter
+                          (all
+                          (house.all-walls  has-cavity-insulation: false)
+                          (house.all-walls  has-construction: AnyCavity)
+                              )
+                      (all-houses))
+                  )
+              
+         (apply
+                  (probe.aggregate
+                      (measure.wall-insulation suitable-construction:AnySolid thickness: 0 u-value: 0.1
+                                               update-flags: CladdingInsulated
+                                               name: CladdingInsulated
+                                               report: [#SAP #stock_report_Installation_counts #StandardAggregates_Energy+] )
+                  name: AreaOfCladdingM2 capture: (aggregate.sum  size.m2 )
+                      )
+                  to: (filter
+                          (all
+                          (house.all-walls has-external-insulation: false)
+                          (house.all-walls has-construction: AnySolid)
+                          (house.flags-match !CavityInsulated)
+                              ) 
+                  (all-houses)
+                  )
+                  )
+              
+            (apply
+                  (probe.aggregate 
+                      (measure.wall-insulation suitable-construction:Any thickness: 0 u-value: 0.1   
+                                               update-flags: InternalInsulated
+                                               name: InternalInsulated
+                                               report:  [#SAP #stock_report_Installation_counts #StandardAggregates_Energy+] )
+                  name: AreaOfInsulationM2 capture: (aggregate.sum  size.m2 ) 
+                      )
+                  to: (filter
+                          (all
+                          (house.all-walls has-internal-insulation: false)
+                          (house.flags-match !CavityInsulated !CladdingInsulated)
+                              ) 
+                  (all-houses)
+                  )
+                  )
+                     (apply
+                  (probe.aggregate 
+                        (measure.install-glazing  frame-factor:0.7  glazing-type: Double  air-gap:gapOf6mm frame-type: uPVC insulation-type:Argon u-value: 1.6 gains-transmittance: 0.5 light-transmittance: 0.5
+                                                update-flags: DoubleGlazing
+                                               name: DoubleGlazing
+                                           report: [#SAP #stock_report_Installation_counts #StandardAggregates_Energy+] 
+                         )
+                      name: AreaOfGlazingM2 capture: (aggregate.sum  size.m2)
+                      )
+                  to: (filter
+                          ( > (house.u-value of: Windows) 3 ) 
+                  (all-houses)
+                  )
+                  )
+              
+       (apply
+                  (probe.aggregate 
+                        (measure.heat-pump  hybrid-fuel: MainsGas  hybrid-efficiency: 0.90 hybrid-ratio: [0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5]
+                                           report: [#SAP #stock_report_Installation_counts #StandardAggregates_Energy+] 
+                         )
+                      name: NumberOfHybrids capture: (aggregate.count)
+                      )
+                  to: (filter
+                          (< (house.heating-efficiency measurement: Winter of: PrimarySpaceHeating) 1 ) 
+                  (all-houses)
+                  )
+                  )
+              (apply name: AllHousesReportAfter
+                  (send-to-report #StandardAggregates_Energy+ from: AllHousesReportAfter)
+                  to: (all-houses)
+                  )
+              
+
+              
+     )
+
+    )
